@@ -1,0 +1,269 @@
+---
+title: "Plots of exposure trends for information items"
+author: "Kim Johnson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+# Install packages and open libraries
+```{r}
+pacman::p_load(readxl, Hmisc, lubridate, tidyverse, dplyr, openxlsx, janitor, table1, tidyr, lme4, ggplot2, patchwork)
+```
+
+# Import data
+```{r, Warning = FALSE}
+# Import latest version of SurveyExport_Merged file
+suppressWarnings({
+data <- read.xlsx("../3_GENERATED WEEKLY FILES/SurveyExport_Merged.xlsx", detectDates = TRUE) # do not use read_xlsx because won't read all the data
+})
+
+myth_data <- read_csv("./myth_vars.csv")
+```
+
+# Generate exposure plots for last 5 months of information items
+```{r}
+# Change all M_ variable values to numerical responses
+data2 <- data %>%
+  mutate_at(vars(starts_with("M")), ~case_when(
+    . == "Yes" ~ 1,
+    . == "Not sure" ~ 0,
+    . == "No" ~ 0,
+    . == "Definitely true" ~ 1,
+    . == "Seems like it could be true" ~ 1,
+    . == "Not sure if it's true or untrue" ~ 1,
+    . == "Seems like it's not true" ~ 0,
+    . == "Definitely not true" ~ 0))
+
+# select information item variables
+data3 <- data2 %>%
+  dplyr::select(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_cat, site, matches("^M\\d+_[^_]+$|^M\\d+_[^_]+_react$"))
+
+# make long dataset
+data4 <- data3 %>%
+  dplyr::select(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_cat, site, matches("^M\\d+_[^_]+$|^M\\d+_[^_]+_react$")) %>%
+  pivot_longer(cols = -c(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_cat, site),  names_to = "MVar",  values_to = "MVar_value") 
+
+# limit to survey dates ≥10/1/2023
+data5 <- data4 %>%
+  filter(surveydate >= "2023-10-01")
+
+# limit to exposure variables
+exposure <- data5 %>%
+  filter(!str_detect(MVar, "_react")) %>%
+  filter(!is.na(MVar_value))
+
+# Check calculation for percent
+test <- exposure %>%
+  filter(MVar == "M153_CovTstExp" & surveydate == "2024-02-24")
+```
+
+```{r}
+# make a list of information items that are included in the last survey date
+last_survey <- exposure %>%
+  filter(surveydate == max(surveydate)) %>%
+  distinct(MVar) %>%
+  mutate(MVar = as.character(MVar)) %>%
+  as.list()
+```
+
+# All site 
+```{r}
+# make summary dataframe with percent exposure
+exposure_summary <- exposure %>%
+  # filter(site == "STL") %>%
+  group_by(surveydate, MVar) %>%
+  summarise(percent = sum(MVar_value)/n()*100) %>%
+  ungroup() 
+```
+
+
+```{r}
+model1<- lm(percent ~ surveydate, exposure_summary %>% filter(MVar =="M120_CovNrise"))
+summary(model1)
+table(exposure_summary$MVar)
+
+# Identify duplicated rows based on the 'MVar' column
+duplicated_rows <- duplicated(exposure_summary$MVar) | duplicated(exposure_summary$MVar, fromLast = TRUE)
+
+# Remove non-duplicated rows
+cleaned_exposure_summary <- exposure_summary[duplicated_rows, ]
+
+# Print the cleaned dataframe
+print(cleaned_exposure_summary)
+```
+# make date a numeric for quadratic model
+```{r}
+cleaned_exposure_summary <- cleaned_exposure_summary %>%
+  mutate(surveydate_numeric = as.numeric(surveydate))
+```
+
+# Run function over all information items in cleaned_exposure_summary data frame to get model trends
+```{r}  
+# Initialize empty dataframe
+output_df <- data.frame(MVar = character(), 
+                        p_value_surveydate_model1 = numeric(), 
+                        p_value_surveydate_model_q = numeric(), 
+                        p_value_surveydate_model_p = numeric(), 
+                        stringsAsFactors = FALSE)
+
+# Define function with for loop
+fit_linear_models<- function(data) {
+  # Iterate over unique MVar values
+  for (mvar_value in unique(data$MVar)) {
+    
+  # Subset data for the current MVar value
+    subset_data <<- filter(data, MVar == mvar_value)
+    
+    # Fit linear model (model1)
+    model1 <<- lm(percent ~ surveydate_numeric, data = subset_data)
+    
+    # Fit quadratic model (model_q)
+    model_q <- lm(percent ~ surveydate_numeric + I(surveydate_numeric^2), data = subset_data)
+    
+    # Fit a polynomial model
+    model_p <- lm(percent ~ surveydate_numeric + I(surveydate_numeric^4), data = subset_data)
+    
+    # Extract p-value for surveydate from model1
+    p_value_surveydate_model1 <- summary(model1)$coefficients["surveydate_numeric", "Pr(>|t|)"]
+    
+    # Extract p-value for surveydate from model_q
+    p_value_surveydate_model_q <- summary(model_q)$coefficients["surveydate_numeric", "Pr(>|t|)"]
+    
+    # Extract p-value for surveydate from model_p
+    p_value_surveydate_model_p <- summary(model_p)$coefficients["surveydate_numeric", "Pr(>|t|)"]
+    
+    # Create a dataframe for the current MVar, p-values for model1 and model_q
+    output_row <- data.frame(MVar = mvar_value, 
+                              p_value_surveydate_model1 = p_value_surveydate_model1,
+                              p_value_surveydate_model_q = p_value_surveydate_model_q,
+                              p_value_surveydate_model_p = p_value_surveydate_model_p)
+    
+    # Append the dataframe to the output dataframe
+    output_df <- bind_rows(output_df, output_row)
+  }
+  return(output_df)
+}
+
+# Call the function to fit linear models and extract p-values
+output_dataset <- fit_linear_models(cleaned_exposure_summary)
+
+# Print the output dataset
+print(output_dataset)
+```
+
+# Drop criteria 2 rule (model rule)
+- Has been on the survey at least 3 times &
+- The difference between the absolute value of the current exposure survey percent and the mean exposure survey percent  is ≥ 0.75 the standard deviation of the mean OR 
+- There are no significant (p > .05) linear, quadratic, or polynomial trends 
+```{r}
+# get standard deviation in percent by each information item
+exposure_summary2 <- exposure_summary %>%
+  group_by(MVar) %>%
+  summarise(sd= sd(percent),
+            mean = mean(percent)) 
+
+# calculate % difference between mean exposure and last surveydate; if it is larger than the sd then flag
+last_two_dates <- exposure_summary %>% 
+    group_by(MVar) %>%
+  arrange(desc(surveydate)) %>% 
+  slice(1:2) %>%
+  arrange(MVar, surveydate) %>%
+  group_by(MVar) %>%
+  summarise(MVar_diff = last(percent) - first(percent)) 
+  
+
+data_stats <- left_join(last_two_dates, exposure_summary2, by = "MVar") 
+
+data_stats2 <- left_join(data_stats, output_dataset, by= "MVar")
+
+# merge in number of times each item was asked
+number_times <- exposure_summary %>%
+  group_by(MVar) %>%
+  count(MVar) 
+
+data_stats3 <- left_join(data_stats2, number_times, by = "MVar")
+
+# Filtering to drop
+final<- data_stats3  %>%
+  mutate(three_q_SDflag = (abs(MVar_diff) > 0.75*sd)) %>%
+  filter(n >=3, MVar %in% last_survey$MVar) %>% # limit to information items on last survey and on at least three surveys
+  mutate(flag3 = if_else(abs(MVar_diff) < 0.75*sd & 
+                          (p_value_surveydate_model1 >= .05 & 
+                          p_value_surveydate_model_p >= .05 & 
+                          p_value_surveydate_model_q >= .05), 1, 0)) %>% 
+  mutate(rule_model = if_else(flag3 ==1, "Met", "Unmet"))
+```
+
+# Drop criteria 1 rule (15 % rule)
+- Has been on the survey at least 3 times &
+- Has been dropping for three weeks in a row with the last survey exposure % below 15% OR
+```{r}
+# additional criteria last 3 exposure % under 15% and consistently decreasing. The starting dataframe for this is cleaned_exposure summary
+
+rule15percent <- left_join(cleaned_exposure_summary, number_times, by = "MVar") %>%
+  filter(MVar %in% last_survey$MVar, n >=3)  %>% # limit to information items in last_survey$MVar
+  arrange(surveydate) %>%  # Arrange by surveydate to ensure proper ordering
+  group_by(MVar) %>%
+  mutate(rank = rank(surveydate)) %>% # assign rank to each survey date
+  mutate(flag = if_else(rank == max(rank)  & percent <15, 1, 0)) %>% # flag those with exposure percent <15% on last survey date
+  mutate(flag2 = if_else(flag == 1 & percent[rank == max(rank)] < percent[rank == max(rank)- 1], 1, 0)) %>% # flag those where exposure percent on last survey date < exposure percent on prior survey date
+  mutate(flag3 = if_else(flag2 == 1 & percent[rank == max(rank) -1] < percent[rank == max(rank) -2], 1, 0), NULL) %>% # flag those where exposure percent on prior survey date < exposure percent on the first survey date of three in the series
+  mutate(rule_15 = if_else(flag3 ==1, "Met", "Unmet"))
+
+```
+
+# Create drop list dataframe based on meeting either the model rule or the 15% rule
+```{r}
+drop_list <- full_join(final, rule15percent, by = "MVar") %>%
+  select(MVar, 
+         p_value_surveydate_model_p, 
+         p_value_surveydate_model1, 
+         p_value_surveydate_model_q, 
+         three_q_SDflag, 
+         rule_15, 
+         rule_model) %>%
+  filter(rule_15 == "Met"|rule_model == "Met") %>%
+  unique()
+```
+
+# Export drop list with unique file name with today's date added
+```{r}
+# Get today's date
+today <- format(Sys.Date(), "%m%d%Y")
+
+write.xlsx(drop_list, file=paste0("../3_GENERATED WEEKLY FILES/Removal recommendations/drop_list", today, ".xlsx"), showNA=TRUE, overwrite = TRUE)       
+```
+
+
+# Plots of exposure for each information item. 
+```{r}
+# limit to survey items on last survey
+last_survey2 <-  exposure_summary %>%
+  filter(MVar %in% last_survey$MVar) 
+
+# List of ggplot objects
+plot_list <- lapply(unique(last_survey2$MVar), function(m) {
+  ggplot(subset(last_survey2, MVar == m), aes(x = surveydate, y = percent)) +
+  geom_point(color = "blue") +
+  geom_line(color = "red") +
+    labs(title = paste("MVar:", m)) +
+  scale_y_continuous(limits = c(0, 75)) +
+    theme_minimal() 
+})
+
+# Combine plots and facet
+combined_plot <- plot_list[[1]]
+for (i in 2:length(plot_list)) {
+  combined_plot <- combined_plot + plot_list[[i]] + facet_wrap(~MVar) 
+}
+
+```
+
+# Export plots file
+```{r}
+# Save as PDF with today's date in the filename
+pdf(paste0("../3_GENERATED WEEKLY FILES/Removal recommendations/trend_plots", today, ".pdf"), width = 16, height = 10)
+print(combined_plot)
+dev.off()
+```
