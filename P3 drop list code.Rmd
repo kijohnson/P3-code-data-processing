@@ -15,10 +15,10 @@ pacman::p_load(readxl, Hmisc, lubridate, tidyverse, dplyr, openxlsx, janitor, ta
 ```{r, Warning = FALSE}
 # Import latest version of SurveyExport_Merged file
 suppressWarnings({
-data <- read.xlsx("../3_GENERATED WEEKLY FILES/SurveyExport_Merged.xlsx", detectDates = TRUE) # do not use read_xlsx because won't read all the data
+data <- read.xlsx("../3_GENERATED WEEKLY FILES/SurveyExport_Merged_2.xlsx", detectDates = TRUE) # do not use read_xlsx because won't read all the data
 })
 
-myth_data <- read_csv("./myth_vars.csv")
+myth_data <- read_csv("./myth_vars2.csv")
 ```
 
 # Generate exposure plots for last 5 months of information items
@@ -37,12 +37,12 @@ data2 <- data %>%
 
 # select information item variables
 data3 <- data2 %>%
-  dplyr::select(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_cat, site, matches("^M\\d+_[^_]+$|^M\\d+_[^_]+_react$"))
+  dplyr::select(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_ethnicity_cat, site, matches("^M\\d+_[^_]+$|^M\\d+_[^_]+_react$"))
 
 # make long dataset
 data4 <- data3 %>%
-  dplyr::select(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_cat, site, matches("^M\\d+_[^_]+$|^M\\d+_[^_]+_react$")) %>%
-  pivot_longer(cols = -c(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_cat, site),  names_to = "MVar",  values_to = "MVar_value") 
+  dplyr::select(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_ethnicity_cat, site, matches("^M\\d+_[^_]+$|^M\\d+_[^_]+_react$")) %>%
+  pivot_longer(cols = -c(ExternalReference, surveydate, gender_cat, age_cat_baseline, race_ethnicity_cat, site),  names_to = "MVar",  values_to = "MVar_value") 
 
 # limit to survey dates ≥10/1/2023
 data5 <- data4 %>%
