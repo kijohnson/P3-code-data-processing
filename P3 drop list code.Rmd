@@ -46,7 +46,7 @@ data4 <- data3 %>%
 
 # limit to survey dates ≥10/1/2023
 data5 <- data4 %>%
-  filter(surveydate >= "2023-10-01")
+  filter(surveydate >= "2023-10-01") 
 
 # limit to exposure variables
 exposure <- data5 %>%
@@ -154,7 +154,7 @@ print(output_dataset)
 
 # Drop criteria 2 rule (model rule)
 - Has been on the survey at least 3 times &
-- The difference between the absolute value of the current exposure survey percent and the mean exposure survey percent  is ≥ 0.75 the standard deviation of the mean OR 
+- The difference between the absolute value of the current exposure survey percent and the mean exposure survey percent is < 0.75 the standard deviation of the mean AND 
 - There are no significant (p > .05) linear, quadratic, or polynomial trends 
 ```{r}
 # get standard deviation in percent by each information item
@@ -187,6 +187,8 @@ data_stats3 <- left_join(data_stats2, number_times, by = "MVar")
 # Filtering to drop
 final<- data_stats3  %>%
   mutate(three_q_SDflag = (abs(MVar_diff) > 0.75*sd)) %>%
+  mutate(abs_MVar_diff = abs(MVar_diff)) %>%
+  mutate(three_fourth_sd = 0.75*sd) %>%
   filter(n >=3, MVar %in% last_survey$MVar) %>% # limit to information items on last survey and on at least three surveys
   mutate(flag3 = if_else(abs(MVar_diff) < 0.75*sd & 
                           (p_value_surveydate_model1 >= .05 & 
@@ -200,7 +202,6 @@ final<- data_stats3  %>%
 - Has been dropping for three weeks in a row with the last survey exposure % below 15% OR
 ```{r}
 # additional criteria last 3 exposure % under 15% and consistently decreasing. The starting dataframe for this is cleaned_exposure summary
-
 rule15percent <- left_join(cleaned_exposure_summary, number_times, by = "MVar") %>%
   filter(MVar %in% last_survey$MVar, n >=3)  %>% # limit to information items in last_survey$MVar
   arrange(surveydate) %>%  # Arrange by surveydate to ensure proper ordering
